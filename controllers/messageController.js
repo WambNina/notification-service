@@ -144,7 +144,7 @@ exports.getAllMessages = async (req, res) => {
     // Count total
     const countQuery = `SELECT COUNT(*) as total FROM messages ${whereClause}`;
     const [countResult] = await db.execute(countQuery, params);
-    const total = countResult[0].total;
+    const total = parseInt(countResult[0].total, 10);
     console.log('[GET /api/messages] Total records:', total);
 
     // Fetch data

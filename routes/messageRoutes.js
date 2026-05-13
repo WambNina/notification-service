@@ -70,19 +70,16 @@ router.post('/message', upload.single('image'), messageController.sendMessage);
  *         schema:
  *           type: string
  *         description: Search in sender or recipient email (partial match)
- *         example: john@gmail.com
  *       - in: query
  *         name: subject
  *         schema:
  *           type: string
  *         description: Search in subject line (partial match)
- *         example: Project
  *       - in: query
  *         name: text
  *         schema:
  *           type: string
  *         description: Search in message body (partial match)
- *         example: update
  *       - in: query
  *         name: page
  *         schema:
