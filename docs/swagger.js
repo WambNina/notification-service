@@ -9,12 +9,12 @@ const options = {
       version: '1.0.0',
       description: 'Simple notification service with email, MySQL, and image attachments',
     },
-    servers: [
-      {
-        url: 'http://localhost:3004',
-        description: 'Local development server',
-      },
-    ],
+    // servers: [
+    //   {
+    //     url: 'http://localhost:3004',
+    //     description: 'Local development server',
+    //   },
+    // ],
   },
   // Use absolute path based on this file's location
   apis: [path.join(__dirname, '../routes/*.js')],
