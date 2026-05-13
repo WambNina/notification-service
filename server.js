@@ -55,3 +55,13 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
   console.log(`📚 Swagger Docs at http://localhost:${PORT}/api-docs/`);
 });
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running at http://localhost:${PORT}`);
+    console.log(`📚 Swagger Docs at http://localhost:${PORT}/api-docs/`);
+  });
+}
+
+// Export for Vercel serverless
+module.exports = app;

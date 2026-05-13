@@ -1,22 +1,24 @@
 const swaggerJsdoc = require('swagger-jsdoc');
 const path = require('path');
 
+const PORT = process.env.PORT || 3004;
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+
 const options = {
   definition: {
     openapi: '3.0.0',
     info: {
       title: 'Notification Service API',
       version: '1.0.0',
-      description: 'Simple notification service with email, MySQL, and image attachments',
+      description: 'Simple notification service with email, Supabase, and image attachments',
     },
     servers: [
       {
-        url: 'http://localhost:3004',
-        description: 'Local development server',
+        url: PUBLIC_URL,
+        description: 'Current environment server',
       },
     ],
   },
-  // Use absolute path based on this file's location
   apis: [path.join(__dirname, '../routes/*.js')],
 };
 

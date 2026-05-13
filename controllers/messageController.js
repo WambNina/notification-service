@@ -1,3 +1,4 @@
+// controllers/messageController.js
 const db = require('../config/supabase');
 const emailService = require('../services/email/emailService');
 const crypto = require('crypto');
@@ -18,14 +19,14 @@ exports.sendMessage = async (req, res) => {
 
     if (!from || !to || !subject || !text) {
       console.log('[POST /api/message] Validation failed - missing fields');
-      if (req.file) await fs.unlink(req.file.path).catch(() => {});
+      if (req.file && req.file.path) await fs.unlink(req.file.path).catch(() => {});
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: from, to, subject, text',
       });
     }
 
-    const attachmentPath = req.file ? req.file.path : null;
+    const attachmentPath = (req.file && req.file.path) ? req.file.path : null;
     const trackingToken = generateToken();
     console.log('[POST /api/message] Generated tracking token:', trackingToken);
 
@@ -53,16 +54,22 @@ exports.sendMessage = async (req, res) => {
 
     const attachments = [];
     if (req.file) {
-      attachments.push({
-        filename: req.file.originalname,
-        path: req.file.path,
-      });
-      console.log('[POST /api/message] Attachment added:', req.file.originalname);
+      if (req.file.path) {
+        // Local disk storage
+        attachments.push({
+          filename: req.file.originalname,
+          path: req.file.path,
+        });
+        console.log('[POST /api/message] Attachment added (disk):', req.file.originalname);
+      } else if (req.file.buffer) {
+        // Vercel memory storage
+        attachments.push({
+          filename: req.file.originalname,
+          content: req.file.buffer,
+        });
+        console.log('[POST /api/message] Attachment added (memory):', req.file.originalname);
+      }
     }
-
-    console.log('[POST /api/message] Sending email via Nodemailer...');
-    await emailService.sendEmail({ from, to, subject, text, html: htmlBody, attachments });
-    console.log('[POST /api/message] Email sent successfully');
 
     res.status(200).json({
       success: true,
@@ -80,7 +87,7 @@ exports.sendMessage = async (req, res) => {
     });
   } catch (error) {
     console.error('[POST /api/message] ERROR:', error.message);
-    if (req.file) {
+    if (req.file && req.file.path) {
       try { await fs.unlink(req.file.path); } catch (e) {}
     }
     if (messageId) {

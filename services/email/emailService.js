@@ -1,3 +1,4 @@
+// services/email/emailService.js
 const transporter = require('../../config/email');
 
 exports.sendEmail = async ({ from, to, subject, text, html, attachments = [] }) => {
