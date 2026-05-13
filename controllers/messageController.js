@@ -1,13 +1,13 @@
-// controllers/messageController.js
-const db = require('../config/supabase');
+const db = require('../config/db');
 const emailService = require('../services/email/emailService');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 
+// Generate unique tracking token
 const generateToken = () => crypto.randomBytes(32).toString('hex');
 
 // ==========================================
-// POST /api/message
+// POST /api/message - Send a new message
 // ==========================================
 exports.sendMessage = async (req, res) => {
   let messageId = null;
@@ -17,34 +17,36 @@ exports.sendMessage = async (req, res) => {
     const { from, to, subject, text } = req.body;
     console.log('[POST /api/message] Body:', { from, to, subject, text: text?.substring(0, 50) });
 
+    // Validation
     if (!from || !to || !subject || !text) {
       console.log('[POST /api/message] Validation failed - missing fields');
-      if (req.file && req.file.path) await fs.unlink(req.file.path).catch(() => {});
+      if (req.file) await fs.unlink(req.file.path).catch(() => {});
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: from, to, subject, text',
       });
     }
 
-    const attachmentPath = (req.file && req.file.path) ? req.file.path : null;
+    const attachmentPath = req.file ? req.file.path : null;
     const trackingToken = generateToken();
     console.log('[POST /api/message] Generated tracking token:', trackingToken);
 
-    // PostgreSQL INSERT with RETURNING id
+    // Save to DB
     const query = `
       INSERT INTO messages (sender_email, recipient_email, subject, message_text, attachment_path, status, tracking_token)
-      VALUES ($1, $2, $3, $4, $5, 'sent', $6)
-      RETURNING id
+      VALUES (?, ?, ?, ?, ?, 'sent', ?)
     `;
-    const result = await db.query(query, [from, to, subject, text, attachmentPath, trackingToken]);
-    messageId = result.rows[0].id;
+    const [result] = await db.execute(query, [from, to, subject, text, attachmentPath, trackingToken]);
+    messageId = result.insertId;
     console.log('[POST /api/message] Saved to DB with ID:', messageId);
 
     // Build tracking pixel URL
-    const publicUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-    const trackingUrl = `${publicUrl}/api/track/${trackingToken}`;
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const trackingUrl = `${protocol}://${host}/api/track/${trackingToken}`;
     console.log('[POST /api/message] Tracking URL:', trackingUrl);
 
+    // Build HTML body with tracking pixel
     const htmlBody = `
       <div style="font-family: Arial, sans-serif;">
         <p>${text.replace(/\n/g, '<br>')}</p>
@@ -52,24 +54,20 @@ exports.sendMessage = async (req, res) => {
       </div>
     `;
 
+    // Prepare attachments
     const attachments = [];
     if (req.file) {
-      if (req.file.path) {
-        // Local disk storage
-        attachments.push({
-          filename: req.file.originalname,
-          path: req.file.path,
-        });
-        console.log('[POST /api/message] Attachment added (disk):', req.file.originalname);
-      } else if (req.file.buffer) {
-        // Vercel memory storage
-        attachments.push({
-          filename: req.file.originalname,
-          content: req.file.buffer,
-        });
-        console.log('[POST /api/message] Attachment added (memory):', req.file.originalname);
-      }
+      attachments.push({
+        filename: req.file.originalname,
+        path: req.file.path,
+      });
+      console.log('[POST /api/message] Attachment added:', req.file.originalname);
     }
+
+    // Send email
+    console.log('[POST /api/message] Sending email via Nodemailer...');
+    await emailService.sendEmail({ from, to, subject, text, html: htmlBody, attachments });
+    console.log('[POST /api/message] Email sent successfully');
 
     res.status(200).json({
       success: true,
@@ -87,17 +85,20 @@ exports.sendMessage = async (req, res) => {
     });
   } catch (error) {
     console.error('[POST /api/message] ERROR:', error.message);
-    if (req.file && req.file.path) {
+
+    if (req.file) {
       try { await fs.unlink(req.file.path); } catch (e) {}
     }
+
     if (messageId) {
       try {
-        await db.query('UPDATE messages SET status = $1 WHERE id = $2', ['failed', messageId]);
+        await db.execute('UPDATE messages SET status = ? WHERE id = ?', ['failed', messageId]);
         console.log('[POST /api/message] Marked message', messageId, 'as failed');
       } catch (dbErr) {
         console.error('[POST /api/message] Failed to update status:', dbErr.message);
       }
     }
+
     res.status(500).json({
       success: false,
       message: 'Failed to send message',
@@ -107,7 +108,7 @@ exports.sendMessage = async (req, res) => {
 };
 
 // ==========================================
-// GET /api/messages - List/Search/Paginate
+// GET /api/messages - List all messages
 // ==========================================
 exports.getAllMessages = async (req, res) => {
   console.log('[GET /api/messages] Request received');
@@ -120,44 +121,39 @@ exports.getAllMessages = async (req, res) => {
     const searchLimit = parseInt(limit);
     const params = [];
     const conditions = [];
-    let paramIndex = 1;
 
     if (email) {
-      conditions.push(`(sender_email ILIKE $${paramIndex} OR recipient_email ILIKE $${paramIndex + 1})`);
+      conditions.push('(sender_email LIKE ? OR recipient_email LIKE ?)');
       const emailPattern = `%${email}%`;
       params.push(emailPattern, emailPattern);
-      paramIndex += 2;
     }
 
     if (subject) {
-      conditions.push(`subject ILIKE $${paramIndex}`);
+      conditions.push('subject LIKE ?');
       params.push(`%${subject}%`);
-      paramIndex += 1;
     }
 
     if (text) {
-      conditions.push(`message_text ILIKE $${paramIndex}`);
+      conditions.push('message_text LIKE ?');
       params.push(`%${text}%`);
-      paramIndex += 1;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Count total
-    const countQuery = `SELECT COUNT(*) AS total FROM messages ${whereClause}`;
-    const countResult = await db.query(countQuery, params);
-    const total = parseInt(countResult.rows[0].total);
+    const countQuery = `SELECT COUNT(*) as total FROM messages ${whereClause}`;
+    const [countResult] = await db.execute(countQuery, params);
+    const total = countResult[0].total;
     console.log('[GET /api/messages] Total records:', total);
 
-    // Fetch paginated rows
-    const dataParams = [...params, searchLimit, offset];
+    // Fetch data
     const dataQuery = `
       SELECT 
         id,
-        sender_email AS from_email,
-        recipient_email AS to_email,
+        sender_email as from_email,
+        recipient_email as to_email,
         subject,
-        message_text AS text,
+        message_text as text,
         attachment_path,
         status,
         created_at,
@@ -165,11 +161,10 @@ exports.getAllMessages = async (req, res) => {
       FROM messages
       ${whereClause}
       ORDER BY created_at DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      LIMIT ? OFFSET ?
     `;
 
-    const dataResult = await db.query(dataQuery, dataParams);
-    const rows = dataResult.rows;
+    const [rows] = await db.execute(dataQuery, [...params, searchLimit, offset]);
     console.log('[GET /api/messages] Records returned:', rows.length);
 
     const totalPages = Math.ceil(total / searchLimit);
@@ -200,28 +195,31 @@ exports.getAllMessages = async (req, res) => {
 
 // ==========================================
 // GET /api/track/:token - Tracking pixel
+// Returns 1x1 PNG, marks message as read
 // ==========================================
 exports.trackMessage = async (req, res) => {
   const { token } = req.params;
   console.log('[GET /api/track/:token] Tracking pixel requested. Token:', token);
 
   try {
-    const result = await db.query(
-      'SELECT id, status FROM messages WHERE tracking_token = $1',
+    // Find message by tracking token
+    const [rows] = await db.execute(
+      'SELECT id, status FROM messages WHERE tracking_token = ?',
       [token]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       console.log('[GET /api/track/:token] Token not found in DB');
       return sendPixel(res);
     }
 
-    const message = result.rows[0];
+    const message = rows[0];
     console.log('[GET /api/track/:token] Found message ID:', message.id, '| Current status:', message.status);
 
+    // Mark as read if still sent
     if (message.status === 'sent') {
-      await db.query(
-        'UPDATE messages SET status = $1, read_at = NOW() WHERE id = $2',
+      await db.execute(
+        'UPDATE messages SET status = ?, read_at = NOW() WHERE id = ?',
         ['read', message.id]
       );
       console.log('[GET /api/track/:token] Message', message.id, 'marked as READ');
