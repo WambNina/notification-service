@@ -19,14 +19,23 @@ if (!fs.existsSync(uploadsDir)) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple request logger
+// Request logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
 });
 
-// Swagger Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// ==========================================
+// Swagger Docs - Redirect /api-docs → /api-docs/
+// ==========================================
+app.get('/api-docs', (req, res) => {
+  res.redirect('/api-docs/');
+});
+
+app.use('/api-docs/', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customSiteTitle: 'Notification Service API'
+}));
 
 // API Routes
 app.use('/api', messageRoutes);
@@ -44,5 +53,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
-  console.log(`📚 Swagger Docs at http://localhost:${PORT}/api-docs`);
+  console.log(`📚 Swagger Docs at http://localhost:${PORT}/api-docs/`);
 });
